@@ -51,21 +51,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 1) Diga ao SDK quais dispositivos são de teste (incluindo o emulador)
-        val testDeviceIds = listOf(AdRequest.DEVICE_ID_EMULATOR)
-        val configuration = RequestConfiguration.Builder()
-            .setTestDeviceIds(testDeviceIds)
-            .build()
-        MobileAds.setRequestConfiguration(configuration)
-
         // Configurar ViewModel
         setupViewModel()
 
-        // 2) Inicialize o SDK
-        MobileAds.initialize(this) { Log.d("AdMob", "SDK inicializado") }
-
-        // 3) Carregue seu interstitial ou rewarded ad normalmente
-        loadInterstitialAd()
+        MobileAds.initialize(this)
+        loadRewardedAd()
 
         setContent {
             FrasesQueDespertamTheme {
@@ -74,42 +64,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Carrega um Interstitial estático */
-    private fun loadInterstitialAd() {
-        val adRequest = AdRequest.Builder().build()
+    // sempre que a Activity entra em foreground, mostra o intersticial
+    override fun onStart() {
+        super.onStart()
+        loadAndShowInterstitial()
+    }
 
+    private fun loadAndShowInterstitial() {
+        val adRequest = AdRequest.Builder().build()
         InterstitialAd.load(
             this,
-            TEST_INTERSTITIAL_ID,
+            "ca-app-pub-3940256099942544/1033173712", // seu ad unit ID de interstitial
             adRequest,
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
-                    Log.d("AdMob", "Interstitial carregado")
                     interstitialAd = ad
-                    setupAndShowInterstitial()
+                    ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+                        override fun onAdDismissedFullScreenContent() {
+                            // se quiser, pode recarregar para a próxima exibição
+                            interstitialAd = null
+                        }
+                        override fun onAdFailedToShowFullScreenContent(error: AdError) {
+                            interstitialAd = null
+                        }
+                    }
+                    ad.show(this@MainActivity)
                 }
-                override fun onAdFailedToLoad(loadAdError: LoadAdError) {
-                    Log.e("AdMob", "Falha ao carregar interstitial: ${loadAdError.message}")
+                override fun onAdFailedToLoad(error: LoadAdError) {
                     interstitialAd = null
                 }
             }
         )
-    }
-
-    private fun setupAndShowInterstitial() {
-        interstitialAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
-            override fun onAdDismissedFullScreenContent() {
-                Log.d("AdMob", "Interstitial fechado pelo usuário")
-                interstitialAd = null
-                loadInterstitialAd()  // já prepara o próximo
-            }
-            override fun onAdFailedToShowFullScreenContent(adError: AdError) {
-                Log.e("AdMob", "Erro ao mostrar interstitial: ${adError.message}")
-                interstitialAd = null
-            }
-        }
-        // Só mostramos se ele não for nulo
-        interstitialAd?.show(this) ?: Log.w("AdMob", "Interstitial ainda não está pronto")
     }
 
     private companion object {
