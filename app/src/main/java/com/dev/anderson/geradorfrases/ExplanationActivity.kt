@@ -66,7 +66,7 @@ fun ExplanationScreen(
                 hasError = false
                 // Você pode trocar por uma chamada real à API do OpenAI
 //                explanation = fetchExplanationOffline(phrase)
-                explanation = fetchAIExplanation(phrase)
+                explanation = ""
                 isLoading = false
             } catch (e: Exception) {
                 hasError = true
