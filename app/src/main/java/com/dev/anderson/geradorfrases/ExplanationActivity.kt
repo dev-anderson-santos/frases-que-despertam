@@ -23,7 +23,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dev.anderson.geradorfrases.ui.theme.FrasesQueDespertamTheme
-import com.dev.anderson.geradorfrases.util.fetchAIExplanation
 import kotlinx.coroutines.launch
 
 class ExplanationActivity : ComponentActivity() {
