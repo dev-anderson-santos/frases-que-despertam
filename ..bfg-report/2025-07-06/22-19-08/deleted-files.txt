@@ -1,0 +1,2 @@
+5277657cbcda99dca005283ed222b526b461e5f2 1526 gradle.properties
+20e2a01520742aff4ec9ce578ed4fe5f3a76fe77 1346 gradle.properties
