@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -47,6 +48,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var phraseViewModel: PhraseViewModel
     private var rewardedAd: RewardedAd? = null
     private var isLoading = false
+
+    // flag de sessão: só pode exibir 1 vez por execução do app
+    private var hasShownRewardedAdThisSession = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,11 +99,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         )
-    }
-
-    private companion object {
-        // Interstitial Ad Unit de teste
-        const val TEST_INTERSTITIAL_ID = "ca-app-pub-3940256099942544/1033173712"
     }
 
     private fun setupViewModel() {
@@ -732,10 +731,12 @@ class MainActivity : ComponentActivity() {
             intent.putExtra("phrase", phrase.text)
             intent.putExtra("explanation", phrase.explanation)
             startActivity(intent)
-        } else {
+        }
+        if (!hasShownRewardedAdThisSession && rewardedAd != null) {
             // Mostrar anúncio e desbloquear
             rewardedAd?.show(this) { _ ->
-                // Salvar como desbloqueada
+                // ganhei recompensa -> Salvar como desbloqueada
+                markPhraseUnlocked(phrase.text, prefs)
                 val currentUnlocked = prefs.getStringSet("desbloqueadas", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
                 currentUnlocked.add(phrase.text)
                 prefs.edit().putStringSet("desbloqueadas", currentUnlocked).apply()
@@ -746,14 +747,24 @@ class MainActivity : ComponentActivity() {
                 intent.putExtra("explanation", phrase.explanation)
                 startActivity(intent)
 
+                // marco que já mostrei o ad nesta sessão
+                hasShownRewardedAdThisSession = true
+
                 // Recarregar anúncio
                 rewardedAd = null
                 loadRewardedAd()
             } ?: run {
                 Toast.makeText(context, "Anúncio não está pronto. Tente novamente.", Toast.LENGTH_SHORT).show()
+                markPhraseUnlocked(phrase.text, prefs)
                 loadRewardedAd()
             }
         }
+    }
+
+    private fun markPhraseUnlocked(text: String, prefs: SharedPreferences) {
+        val unlocked = prefs.getStringSet("desbloqueadas", mutableSetOf())!!.toMutableSet()
+        unlocked.add(text)
+        prefs.edit().putStringSet("desbloqueadas", unlocked).apply()
     }
 
     private fun loadRewardedAd() {
