@@ -18,7 +18,27 @@ class PhraseRepository(private val phraseDao: PhraseDao) {
     }
 
     suspend fun getSubcategories(category: String): List<String> {
-        return phraseDao.getSubcategoriesByCategory(category)
+//        return phraseDao.getSubcategoriesByCategory(category)
+        println("DEBUG: ===== Repository.getSubcategoriesByCategory() =====")
+        println("DEBUG: Buscando subcategorias para categoria: '$category'")
+
+        return try {
+            if (category.isEmpty()) {
+                println("DEBUG: Categoria vazia, retornando lista vazia")
+                emptyList()
+            } else {
+                val result = phraseDao.getSubcategoriesByCategory(category)
+                println("DEBUG: DAO retornou ${result.size} subcategorias")
+                result.forEach { subcategory ->
+                    println("DEBUG: Subcategoria encontrada: '$subcategory'")
+                }
+                result
+            }
+        } catch (e: Exception) {
+            println("ERROR: Erro no repository: ${e.message}")
+            e.printStackTrace()
+            emptyList()
+        }
     }
 
     suspend fun searchPhrases(searchTerm: String): List<Phrase> {

@@ -18,7 +18,16 @@ interface PhraseDao {
     @Query("SELECT DISTINCT category FROM phrases ORDER BY category")
     suspend fun getAllCategories(): List<String>
 
-    @Query("SELECT DISTINCT subcategory FROM phrases WHERE category = :category ORDER BY subcategory")
+//    @Query("SELECT DISTINCT subcategory FROM phrases WHERE category = :category ORDER BY subcategory")
+    @Query("""
+        SELECT DISTINCT subcategory 
+        FROM phrases 
+        WHERE category = :category 
+        AND subcategory IS NOT NULL 
+        AND subcategory != '' 
+        AND TRIM(subcategory) != ''
+        ORDER BY subcategory
+    """)
     suspend fun getSubcategoriesByCategory(category: String): List<String>
 
     @Query("SELECT * FROM phrases WHERE text LIKE '%' || :searchTerm || '%' OR explanation LIKE '%' || :searchTerm || '%' OR tags LIKE '%' || :searchTerm || '%'")
@@ -47,4 +56,7 @@ interface PhraseDao {
 
     @Query("SELECT * FROM phrases WHERE category = :category AND subcategory = :subcategory")
     suspend fun getAllBySubcategory(category: String, subcategory: String): List<Phrase>
+
+    @Query("SELECT * FROM phrases WHERE category = :category ORDER BY RANDOM() LIMIT 1")
+    suspend fun getRandomPhraseByCategory(category: String): Phrase?
 }
