@@ -53,7 +53,7 @@ import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.util.Calendar
+
 
 class MainActivity : ComponentActivity() {
 
@@ -494,7 +494,8 @@ class MainActivity : ComponentActivity() {
                         onShare = { phrase -> sharePhrase(phrase) },
                         onUnlock = { phrase -> unlockExplanation(phrase) },
                         isFromNotification = isFromNotification,
-                        onNotificationPhraseProcessed = onNotificationPhraseProcessed
+                        onNotificationPhraseProcessed = onNotificationPhraseProcessed,
+                        phraseViewModel = phraseViewModel
                     )
                     1 -> FavoritesScreen(
                         favorites = favorites,
@@ -572,8 +573,10 @@ class MainActivity : ComponentActivity() {
         onShare: (Phrase) -> Unit,
         onUnlock: (Phrase) -> Unit,
         isFromNotification: Boolean = false,
-        onNotificationPhraseProcessed: () -> Unit = {}
+        onNotificationPhraseProcessed: () -> Unit = {},
+        phraseViewModel: PhraseViewModel
     ) {
+
         // ✅ Processar frase da notificação uma única vez
         LaunchedEffect(isFromNotification) {
             if (isFromNotification) {
@@ -595,62 +598,60 @@ class MainActivity : ComponentActivity() {
             ) {
                 // Dropdown Categoria
                 Box(modifier = Modifier.weight(1f)) {
-                    OutlinedButton(
-                        onClick = { onShowCategoryDropdown(true) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Text(
-                            text = selectedCategory.ifEmpty { "Categorias" },
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Expandir")
-                    }
-
-                    DropdownMenu(
-                        expanded = showCategoryDropdown,
-                        onDismissRequest = { onShowCategoryDropdown(false) }
-                    ) {
-                        categories.forEach { category ->
-                            DropdownMenuItem(
-                                text = { Text(category) },
-                                onClick = { onCategorySelected(category) }
-                            )
-                        }
-                    }
+//                    CategoryDropdown(
+//                        categories = categories,
+//                        selected = selectedCategory,
+//                        onSelect = onCategorySelected
+//                    )
+                    CategoryAndSubcategoryFilters(
+                        categories          = categories,
+                        subcategories       = subcategories,
+                        selectedCategory    = selectedCategory,
+                        selectedSubcategory = selectedSubcategory,
+                        onCategorySelected  = onCategorySelected,
+                        onSubcategorySelected = onSubcategorySelected
+                    )
                 }
 
                 // Dropdown Subcategoria
-                Box(modifier = Modifier.weight(1f)) {
-                    OutlinedButton(
-                        onClick = { onShowSubcategoryDropdown(true) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = selectedCategory.isNotEmpty(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Text(
-                            text = selectedSubcategory.ifEmpty { "Subcategoria" },
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Expandir")
-                    }
-
-                    DropdownMenu(
-                        expanded = showSubcategoryDropdown,
-                        onDismissRequest = { onShowSubcategoryDropdown(false) }
-                    ) {
-                        subcategories.forEach { subcategory ->
-                            DropdownMenuItem(
-                                text = { Text(subcategory) },
-                                onClick = { onSubcategorySelected(subcategory) }
-                            )
-                        }
-                    }
-                }
+//                Box(modifier = Modifier.weight(1f)) {
+//                    SubcategoryDropdown(
+//                        subcategories        = subcategories,
+//                        selectedCategory     = selectedCategory,
+//                        selectedSubcategory  = selectedSubcategory,
+//                        onSubcategorySelected = { newSub ->
+//                            selectedSubcategory = newSub
+//                        }
+//                    )
+//                    OutlinedButton(
+//                        onClick = { onShowSubcategoryDropdown(true) },
+//                        modifier = Modifier.fillMaxWidth(),
+//                        enabled = selectedCategory.isNotEmpty(),
+//                        colors = ButtonDefaults.outlinedButtonColors(
+//                            contentColor = Color.White
+//                        )
+//                    ) {
+//                        Text(
+//                            text = selectedSubcategory.ifEmpty { "Subcategoria" },
+//                            modifier = Modifier.weight(1f)
+//                        )
+//                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Expandir")
+//                    }
+//
+//                    DropdownMenu(
+//                        expanded = showSubcategoryDropdown,
+//                        onDismissRequest = { onShowSubcategoryDropdown(false) },
+//                        modifier = Modifier
+//                            .heightIn(max = 250.dp)      // nunca passa de 250dp de altura
+//                    ) {
+//                        subcategories.forEach { subcategory ->
+//                            DropdownMenuItem(
+//                                text = { Text(subcategory) },
+//                                onClick = { onSubcategorySelected(subcategory) }
+//                            )
+//                        }
+//                    }
+//                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -737,8 +738,33 @@ class MainActivity : ComponentActivity() {
     ) {
         var showExplanation by remember { mutableStateOf(false) }
         val context = LocalContext.current
+        // ✅ Estado local para feedback imediato do favorito
+        var isFavoriteLocal by remember(phrase.isFavorite) { mutableStateOf(phrase.isFavorite) }
         val prefs = context.getSharedPreferences("frases_prefs", Context.MODE_PRIVATE)
-        val isUnlocked = prefs.getStringSet("desbloqueadas", emptySet())?.contains(phrase.text) == true
+        var isUnlocked by remember {
+            mutableStateOf(prefs.getStringSet("desbloqueadas", emptySet())?.contains(phrase.text) == true)
+        }
+
+        // ✅ Atualizar estado quando a activity retoma (volta do anúncio)
+        DisposableEffect(phrase.text) {
+            val activity = context as? ComponentActivity
+            val listener = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    // Verificar novamente se foi desbloqueado
+                    val updatedUnlocked = prefs.getStringSet("desbloqueadas", emptySet())?.contains(phrase.text) == true
+                    if (updatedUnlocked != isUnlocked) {
+                        isUnlocked = updatedUnlocked
+                        println("DEBUG: Estado de desbloqueio atualizado para: $isUnlocked")
+                    }
+                }
+            }
+
+            activity?.lifecycle?.addObserver(listener)
+
+            onDispose {
+                activity?.lifecycle?.removeObserver(listener)
+            }
+        }
 
         Card(
             modifier = Modifier
@@ -821,6 +847,29 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
+                } else {
+                    // ✅ Mostrar botão de "Ver explicação completa" quando desbloqueado
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onUnlock(phrase) } // Vai abrir a tela de explicação
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Ver explicação",
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Ver explicação completa",
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 // Botões de ação
@@ -830,10 +879,15 @@ class MainActivity : ComponentActivity() {
                 ) {
                     // Favoritar
                     ActionButton(
-                        icon = if (phrase.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        icon = if (isFavoriteLocal) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = "Favoritar",
-                        tint = if (phrase.isFavorite) Color(0xFFFF5252) else Color.White,
-                        onClick = { onToggleFavorite(phrase) }
+                        tint = if (isFavoriteLocal) Color(0xFFFF5252) else Color.White,
+                        onClick = {
+                            // ✅ Atualizar estado local imediatamente para feedback visual
+                            isFavoriteLocal = !isFavoriteLocal
+                            // Chamar callback para atualizar no ViewModel
+                            onToggleFavorite(phrase)
+                        }
                     )
 
                     // Compartilhar
@@ -962,6 +1016,14 @@ class MainActivity : ComponentActivity() {
     ) {
         // ✅ Estado para controlar se está fazendo busca
         var isSearching by remember { mutableStateOf(false) }
+
+        // ✅ Limpar campo ao sair da tela
+        DisposableEffect(Unit) {
+            onDispose {
+                // Limpa o campo quando sai da tela
+                onSearchQueryChange("")
+            }
+        }
 
         // ✅ Busca automática quando digitar 3+ caracteres
         LaunchedEffect(searchQuery) {
@@ -1307,7 +1369,7 @@ class MainActivity : ComponentActivity() {
                     onCheckedChange = phraseViewModel::updateReceiveNotifications
                 )
 
-                if (receiveNotifications) {
+                if (uiState.receiveNotifications) {
                     Spacer(modifier = Modifier.height(8.dp))
                     TimeField(
                         label = "Horário",
@@ -1787,6 +1849,228 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun CategoryDropdown(
+        categories: List<String>,
+        selected: String,
+        onSelect: (String) -> Unit
+    ) {
+        var expanded by remember { mutableStateOf(false) }
+
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded }
+        ) {
+            // Esse menuAnchor() faz o drop apontar pra esse TextField
+            OutlinedTextField(
+                value = selected.ifEmpty { "Categorias" },
+                onValueChange = { /* read-only */ },
+                readOnly = true,
+                label     = { Text("Categorias") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                modifier  = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor()
+            )
+
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.heightIn(max = 250.dp) // limite pra ficar rolável
+            ) {
+                categories.forEach { category ->
+                    DropdownMenuItem(
+                        text = { Text(category) },
+                        onClick = {
+                            onSelect(category)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun SubcategoryDropdown(
+        subcategories: List<String>,
+        selectedCategory: String,
+        selectedSubcategory: String,
+        onSubcategorySelected: (String) -> Unit
+    ) {
+        // estado do menu
+        var expanded by remember { mutableStateOf(false) }
+        // só habilita se houver categoria
+        val enabled = selectedCategory.isNotEmpty()
+
+        // Box que “ancora” o menu
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded },
+            modifier = Modifier
+                .fillMaxWidth()
+        ) {
+            // O campo propriamente dito
+            OutlinedTextField(
+                value = selectedSubcategory.ifEmpty { "Subcategoria" },
+                onValueChange = { /* não muda direto, só pelo menu */ },
+                readOnly = true,
+                label = { Text("Subcategoria") },
+                enabled = enabled,          // habilita/desabilita o campo
+                trailingIcon = {
+                    // só recebe o parâmetro `expanded`
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // o menu suspenso
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                subcategories.forEach { sub ->
+                    DropdownMenuItem(
+                        text = { Text(sub) },
+                        onClick = {
+                            onSubcategorySelected(sub)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun CategoryAndSubcategoryFilters(
+        categories: List<String>,
+        subcategories: List<String>,
+        selectedCategory: String,
+        selectedSubcategory: String,
+        onCategorySelected: (String) -> Unit,
+        onSubcategorySelected: (String) -> Unit
+    ) {
+        var catExpanded by remember { mutableStateOf(false) }
+        var subExpanded by remember { mutableStateOf(false) }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // ── CATEGORIAS ──
+            ExposedDropdownMenuBox(
+                expanded = catExpanded,
+                onExpandedChange = { catExpanded = !catExpanded }
+            ) {
+                OutlinedTextField(
+                    value = selectedCategory.ifEmpty { "Categorias" },
+                    onValueChange = { },
+                    readOnly = true,
+                    label = { Text("Categorias") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(catExpanded) },
+                    colors = ExposedDropdownMenuDefaults.textFieldColors(
+                        // texto digitado
+                        focusedTextColor    = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor  = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // cursor e indicadores
+                        cursorColor             = MaterialTheme.colorScheme.primary,
+                        focusedIndicatorColor   = MaterialTheme.colorScheme.primary,
+                        unfocusedIndicatorColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(),
+                        // label
+                        focusedLabelColor       = MaterialTheme.colorScheme.onSurface,
+                        unfocusedLabelColor     = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                        .menuAnchor(MenuAnchorType.PrimaryEditable, true)
+                )
+                ExposedDropdownMenu(
+                    expanded = catExpanded,
+                    onDismissRequest = { catExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                        // limita a altura do menu e torna-o scrollável
+                        .heightIn(max = 280.dp)
+                        // aplica a mesma cor de fundo do seu Surface
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Todas as categorias") },
+                        onClick = {
+                            onCategorySelected("")
+                            catExpanded = false
+                        }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                    categories.forEach { cat ->
+                        DropdownMenuItem(
+                            text = { Text(cat) },
+                            onClick = {
+                                onCategorySelected(cat)
+                                catExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            // ── SUBCATEGORIAS ──
+            ExposedDropdownMenuBox(
+                expanded = subExpanded,
+                onExpandedChange = {
+                    if (selectedCategory.isNotEmpty()) subExpanded = !subExpanded
+                }
+            ) {
+                OutlinedTextField(
+                    value = selectedSubcategory.ifEmpty { "Subcategoria" },
+                    onValueChange = { },
+                    readOnly = true,
+                    label = { Text("Subcategoria") },
+                    enabled = selectedCategory.isNotEmpty(),
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(subExpanded) },
+                    colors = ExposedDropdownMenuDefaults.textFieldColors(
+                        // texto digitado
+                        focusedTextColor    = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor  = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // cursor e indicadores
+                        cursorColor             = MaterialTheme.colorScheme.primary,
+                        focusedIndicatorColor   = MaterialTheme.colorScheme.primary,
+                        unfocusedIndicatorColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(),
+                        // label
+                        focusedLabelColor       = MaterialTheme.colorScheme.onSurface,
+                        unfocusedLabelColor     = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                        .menuAnchor(MenuAnchorType.PrimaryEditable, true)
+                )
+                ExposedDropdownMenu(
+                    expanded = subExpanded,
+                    onDismissRequest = { subExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                        // limita a altura do menu e torna-o scrollável
+                        .heightIn(max = 280.dp)
+                        // aplica a mesma cor de fundo do seu Surface
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    subcategories.forEach { sub ->
+                        DropdownMenuItem(
+                            text = { Text(sub) },
+                            onClick = {
+                                onSubcategorySelected(sub)
+                                subExpanded = false
+                            }
+                        )
+                    }
+                    if (subcategories.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("Nenhum disponível", color = Color.Gray) },
+                            onClick = { subExpanded = false },
+                            enabled = false
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     private fun rateApp() {
         val uri = Uri.parse("market://details?id=$packageName")
@@ -1813,34 +2097,60 @@ class MainActivity : ComponentActivity() {
         if (isUnlocked) {
             // Já desbloqueado, abrir explicação diretamente
             val intent = Intent(this, ExplanationActivity2::class.java)
-            intent.putExtra("phrase", phrase.text)
-            intent.putExtra("explanation", phrase.explanation)
+            intent.putExtra("phraseId", phrase.id)
+            intent.putExtra("phraseText", phrase.text)
+//            intent.putExtra("explanation", phrase.explanation)
             startActivity(intent)
+            return
         }
-        if (!hasShownRewardedAdThisSession && rewardedAd != null) {
+//        if (!hasShownRewardedAdThisSession && rewardedAd != null) {
+        if (rewardedAd != null) {
             // Mostrar anúncio e desbloquear
-            rewardedAd?.show(this) { _ ->
+            rewardedAd?.show(this) { rewardItem ->
+                println("DEBUG: ✅ Usuário ganhou recompensa: ${rewardItem.amount} ${rewardItem.type}")
                 // ganhei recompensa -> Salvar como desbloqueada
                 markPhraseUnlocked(phrase.text, prefs)
-                val currentUnlocked = prefs.getStringSet("desbloqueadas", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-                currentUnlocked.add(phrase.text)
-                prefs.edit().putStringSet("desbloqueadas", currentUnlocked).apply()
+
+                // Mostrar feedback ao usuário
+                Toast.makeText(context, "✅ Explicação desbloqueada!", Toast.LENGTH_SHORT).show()
+
+//                val currentUnlocked = prefs.getStringSet("desbloqueadas", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
+//                currentUnlocked.add(phrase.text)
+//                prefs.edit().putStringSet("desbloqueadas", currentUnlocked).apply()
 
                 // Abrir explicação
-                val intent = Intent(this, ExplanationActivity2::class.java)
-                intent.putExtra("phrase", phrase.text)
-                intent.putExtra("explanation", phrase.explanation)
+                // ✅ IMPORTANTE: Usar FLAG para não empilhar activities
+                val intent = Intent(this, ExplanationActivity2::class.java).apply {
+                    putExtra("phraseId", phrase.id)
+                    putExtra("phraseText", phrase.text)
+                    // ✅ Flags para evitar empilhamento de activities
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
                 startActivity(intent)
 
                 // marco que já mostrei o ad nesta sessão
-                hasShownRewardedAdThisSession = true
+//                hasShownRewardedAdThisSession = true
 
                 // Recarregar anúncio
                 rewardedAd = null
                 loadRewardedAd()
-            } ?: run {
+            } /*?: run {
                 Toast.makeText(context, "Anúncio não está pronto. Tente novamente.", Toast.LENGTH_SHORT).show()
                 markPhraseUnlocked(phrase.text, prefs)
+                loadRewardedAd()
+            }*/
+        } else {
+            // Anúncio não disponível
+            val message = if (isLoading) {
+                "⏳ Anúncio carregando... Tente novamente em alguns segundos."
+            } else {
+                "❌ Anúncio não disponível. Tentando carregar..."
+            }
+
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+
+            // Tentar carregar se não estiver carregando
+            if (!isLoading) {
                 loadRewardedAd()
             }
         }
@@ -1856,6 +2166,8 @@ class MainActivity : ComponentActivity() {
         if (isLoading || rewardedAd != null) return
         isLoading = true
 
+        println("DEBUG: Iniciando carregamento do anúncio...")
+
         RewardedAd.load(
             this,
             "ca-app-pub-3940256099942544/5224354917", // ID de teste
@@ -1864,10 +2176,35 @@ class MainActivity : ComponentActivity() {
                 override fun onAdLoaded(ad: RewardedAd) {
                     rewardedAd = ad
                     isLoading = false
+
+                    // ✅ Configurar callback para eventos do anúncio
+                    rewardedAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
+                        override fun onAdDismissedFullScreenContent() {
+                            println("DEBUG: Anúncio foi fechado pelo usuário")
+                            // Recarregar novo anúncio para próxima vez
+                            rewardedAd = null
+                            loadRewardedAd()
+                        }
+
+                        override fun onAdFailedToShowFullScreenContent(error: AdError) {
+                            println("DEBUG: ❌ Falha ao mostrar anúncio: ${error.message}")
+                            rewardedAd = null
+                            loadRewardedAd()
+                        }
+
+                        override fun onAdShowedFullScreenContent() {
+                            println("DEBUG: Anúncio foi exibido")
+                        }
+                    }
                 }
                 override fun onAdFailedToLoad(error: LoadAdError) {
                     rewardedAd = null
                     isLoading = false
+
+                    // ✅ Tentar recarregar após alguns segundos
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        loadRewardedAd()
+                    }, 5000)
                 }
             }
         )

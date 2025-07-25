@@ -5,12 +5,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,22 +22,37 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModelProvider
+import com.dev.anderson.geradorfrases.data.PhraseViewModel
+import com.dev.anderson.geradorfrases.data.PhrasesDatabase
+import com.dev.anderson.geradorfrases.repository.PhraseRepository
 import com.dev.anderson.geradorfrases.ui.theme.FrasesQueDespertamTheme
+import com.dev.anderson.geradorfrases.viewmodel.PhraseViewModelFactory
 
 class ExplanationActivity2 : ComponentActivity() {
+
+    private val viewModel: PhraseViewModel by lazy {
+        ViewModelProvider(
+            this,
+            PhraseViewModelFactory(PhraseRepository(PhrasesDatabase.getDatabase(this).phraseDao()), applicationContext)
+        )[PhraseViewModel::class.java]
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val phrase = intent.getStringExtra("phrase") ?: ""
-        val explanation = intent.getStringExtra("explanation") ?: ""
+        val phrase   = intent.getStringExtra("phrase")
+        val phraseId   = intent.getLongExtra("phraseId", -1L)
+        val phraseText = intent.getStringExtra("phraseText") ?: ""
+        println("DEBUG Frase: " + phrase)
 
         setContent {
             FrasesQueDespertamTheme {
                 ExplanationScreen(
-                    phrase = phrase,
-                    explanation = explanation,
-                    onBack = { finish() }
+                    phraseText  = phraseText,
+                    viewModel   = viewModel,
+                    phraseId    = phraseId,
+                    onBack      = { finish() }
                 )
             }
         }
@@ -44,10 +62,21 @@ class ExplanationActivity2 : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExplanationScreen(
-    phrase: String,
-    explanation: String,
+    phraseText: String,
+    viewModel: PhraseViewModel,
+    phraseId: Long,
     onBack: () -> Unit
 ) {
+    // assim que aparecer, dispara o load
+    LaunchedEffect(phraseId) {
+        if (phraseId >= 0) {
+            viewModel.loadExplanation(phraseId)
+        }
+    }
+
+    // observa o LiveData
+    val explanation by viewModel.explanation.observeAsState()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -72,6 +101,7 @@ fun ExplanationScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -95,7 +125,7 @@ fun ExplanationScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "\"$phrase\"",
+                        text = "\"$phraseText\"",
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium,
@@ -134,13 +164,40 @@ fun ExplanationScreen(
                         )
                     }
 
-                    Text(
-                        text = explanation,
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        lineHeight = 24.sp,
-                        fontStyle = FontStyle.Normal
-                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (explanation == null) {
+                        // ainda não carregou → loading
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(80.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFF00BFFF),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Carregando explicação...",
+                                    color = Color.Gray,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    } else {
+                        // já carregou ► exibe texto
+                        Text(
+                            text = explanation!!,
+                            color = Color.White,
+                            lineHeight = 24.sp,
+                            textAlign = TextAlign.Justify
+                        )
+                    }
                 }
             }
 
@@ -154,7 +211,8 @@ fun ExplanationScreen(
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top
                     ) {
                         Icon(
                             Icons.Default.Star,
@@ -171,6 +229,9 @@ fun ExplanationScreen(
                     }
                 }
             }
+
+            // ✅ Espaço extra no final para garantir que o scroll funcione bem
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }

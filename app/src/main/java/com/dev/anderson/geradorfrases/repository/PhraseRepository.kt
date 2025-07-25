@@ -88,4 +88,8 @@ class PhraseRepository(private val phraseDao: PhraseDao) {
 
     suspend fun getAllBySubcategory(category: String, subcategory: String): List<Phrase> =
         phraseDao.getAllBySubcategory(category, subcategory)
+
+    suspend fun getExplanationById(id: Long): String? {
+        return phraseDao.getExplanationById(id)
+    }
 }

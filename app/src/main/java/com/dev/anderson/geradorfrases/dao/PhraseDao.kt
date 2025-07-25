@@ -59,4 +59,7 @@ interface PhraseDao {
 
     @Query("SELECT * FROM phrases WHERE category = :category ORDER BY RANDOM() LIMIT 1")
     suspend fun getRandomPhraseByCategory(category: String): Phrase?
+
+    @Query("SELECT explanation FROM phrases WHERE id = :id")
+    suspend fun getExplanationById(id: Long): String?
 }

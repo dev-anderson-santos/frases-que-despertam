@@ -41,6 +41,9 @@ class PhraseViewModel(private val repository: PhraseRepository,
     private val _errorMessage = MutableLiveData<String?>()
     val errorMessage: LiveData<String?> = _errorMessage
 
+    private val _explanation = MutableLiveData<String?>()
+    val explanation: LiveData<String?> = _explanation
+
     // pools em memória
     private val poolByCategory = mutableMapOf<String, MutableList<Phrase>>()
     private val poolBySubcat   = mutableMapOf<Pair<String,String>, MutableList<Phrase>>()
@@ -419,6 +422,12 @@ class PhraseViewModel(private val repository: PhraseRepository,
     fun testNotification() {
         val notificationManager = NotificationManager(context)
         notificationManager.showTestNotification()
+    }
+
+    fun loadExplanation(id: Long) {
+        viewModelScope.launch {
+            _explanation.value = repository.getExplanationById(id)
+        }
     }
 
     fun clearError() {
