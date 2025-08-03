@@ -101,4 +101,65 @@ class PhraseRepository(private val phraseDao: PhraseDao) {
             false
         }
     }
+
+    // ✅ FUNÇÃO para encontrar frase por texto exato
+    suspend fun findPhraseByText(text: String): Phrase? {
+        return try {
+            phraseDao.findPhraseByText(text)
+        } catch (e: Exception) {
+            println("DEBUG: Erro ao buscar frase por texto: ${e.message}")
+            null
+        }
+    }
+
+    // ✅ FUNÇÃO para encontrar frase similar (opcional - para melhor UX)
+    suspend fun findSimilarPhrase(text: String): Phrase? {
+        return try {
+            // Buscar por palavras-chave principais
+            val keywords = text.split(" ").filter { it.length > 3 }.take(3)
+            phraseDao.findSimilarPhrase("%${keywords.joinToString("%")}%")
+        } catch (e: Exception) {
+            println("DEBUG: Erro ao buscar frase similar: ${e.message}")
+            null
+        }
+    }
+
+    // ✅ FUNÇÃO para inserir ou obter frase existente
+    suspend fun insertOrGetPhrase(phrase: Phrase): Phrase? {
+        return try {
+            // Primeiro verificar se já existe
+            val existing = findPhraseByText(phrase.text)
+            if (existing != null) {
+                return existing
+            }
+
+            // Se não existe, inserir nova
+            val newId = phraseDao.insertPhrase(phrase)
+            phrase.copy(id = newId)
+        } catch (e: Exception) {
+            println("DEBUG: Erro ao inserir/obter frase: ${e.message}")
+            null
+        }
+    }
+
+    // ✅ FUNÇÃO para obter frase por ID
+    suspend fun getPhraseById(id: Long): Phrase? {
+        return try {
+            phraseDao.getPhraseById(id)
+        } catch (e: Exception) {
+            println("DEBUG: Erro ao buscar frase por ID: ${e.message}")
+            null
+        }
+    }
+
+    // ✅ FUNÇÃO para atualizar frase (favoritar/desfavoritar)
+    suspend fun updatePhrase(phrase: Phrase) {
+        try {
+            phraseDao.updatePhrase(phrase)
+            println("DEBUG: Frase atualizada com sucesso: ID=${phrase.id}, isFavorite=${phrase.isFavorite}")
+        } catch (e: Exception) {
+            println("DEBUG: Erro ao atualizar frase: ${e.message}")
+            throw e
+        }
+    }
 }

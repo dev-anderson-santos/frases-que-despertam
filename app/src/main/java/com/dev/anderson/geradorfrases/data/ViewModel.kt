@@ -106,29 +106,56 @@ class PhraseViewModel(private val repository: PhraseRepository,
 
     // ✅ Método para definir frase vinda da notificação
     fun setCurrentPhraseFromNotification(text: String, reference: String, category: String) {
-        val notificationPhrase = Phrase(
-            id = 0,
-            text = text,
-            reference = reference,
-            category = category,
-            subcategory = "",
-            explanation = "",
-            tags = "",
-            isFavorite = false,
-            timesViewed = 0,
-            dateAdded = System.currentTimeMillis().toString()
-        )
-
-        _currentPhrase.value = notificationPhrase
-        println("DEBUG: Frase da notificação definida no ViewModel: '$text'")
-
         viewModelScope.launch {
             try {
-                val favoriteStatus = repository.isPhraseInFavorites(text)
-                _currentPhrase.value = notificationPhrase.copy(isFavorite = favoriteStatus)
-                println("DEBUG: Status de favorito atualizado: $favoriteStatus")
+                _isLoading.value = true
+
+                // 1. Primeiro, tentar encontrar a frase no banco de dados
+                val existingPhrase = repository.findPhraseByText(text)
+
+                if (existingPhrase != null) {
+                    // ✅ Frase existe no banco, usar ela
+                    _currentPhrase.value = existingPhrase
+                    println("DEBUG: Frase da notificação encontrada no banco: ID=${existingPhrase.id}")
+                } else {
+                    // ✅ Frase não existe, criar temporária mas tentar buscar similar
+                    val tempPhrase = Phrase(
+                        id = 0, // ID temporário
+                        text = text,
+                        reference = reference,
+                        category = category,
+                        subcategory = "", // Será preenchido se encontrar no banco
+                        explanation = "Explicação não disponível para esta frase.",
+                        tags = "",
+                        isFavorite = false,
+                        timesViewed = 0,
+                        dateAdded = ""
+                    )
+
+                    _currentPhrase.value = tempPhrase
+
+                    // Tentar encontrar uma frase similar no banco para obter explicação
+                    viewModelScope.launch {
+                        try {
+                            val similarPhrase = repository.findSimilarPhrase(text)
+                            if (similarPhrase != null) {
+                                _currentPhrase.value = tempPhrase.copy(
+                                    id = similarPhrase.id,
+                                    subcategory = similarPhrase.subcategory,
+                                    explanation = similarPhrase.explanation
+                                )
+                                println("DEBUG: Frase similar encontrada: ID=${similarPhrase.id}")
+                            }
+                        } catch (e: Exception) {
+                            println("DEBUG: Erro ao buscar frase similar: ${e.message}")
+                        }
+                    }
+                }
             } catch (e: Exception) {
-                println("DEBUG: Erro ao verificar favorito: ${e.message}")
+                println("DEBUG: Erro ao definir frase da notificação: ${e.message}")
+                _errorMessage.value = "Erro ao carregar frase da notificação"
+            } finally {
+                _isLoading.value = false
             }
         }
     }
@@ -234,22 +261,44 @@ class PhraseViewModel(private val repository: PhraseRepository,
     fun toggleFavorite(phrase: Phrase) {
         viewModelScope.launch {
             try {
-                val newFavoriteStatus = !phrase.isFavorite
-                repository.toggleFavorite(phrase.id, newFavoriteStatus)
+                if (phrase.id <= 0) {
+                    // ✅ Frase temporária (de notificação) - primeiro salvar no banco
+                    val savedPhrase = repository.insertOrGetPhrase(phrase)
+                    if (savedPhrase != null) {
+                        // Atualizar como favorita
+                        val updatedPhrase = savedPhrase.copy(isFavorite = !savedPhrase.isFavorite)
+                        repository.updatePhrase(updatedPhrase)
 
-                // Atualizar o estado local
-                _currentPhrase.value?.let { current ->
-                    if (current.id == phrase.id) {
-                        _currentPhrase.value = current.copy(isFavorite = newFavoriteStatus)
+                        // Atualizar a frase atual se for a mesma
+                        if (_currentPhrase.value?.text == phrase.text) {
+                            _currentPhrase.value = updatedPhrase
+                        }
+
+                        // Recarregar favoritos
+                        loadFavorites()
+
+                        println("DEBUG: Frase da notificação salva e favoritada: ID=${savedPhrase.id}")
+                    } else {
+                        _errorMessage.value = "Erro ao salvar frase nos favoritos"
                     }
-                }
+                } else {
+                    // ✅ Frase normal do banco
+                    val updatedPhrase = phrase.copy(isFavorite = !phrase.isFavorite)
+                    repository.updatePhrase(updatedPhrase)
 
-                // Recarregar favoritos se estiver na tela de favoritos
-                if (_favorites.value != null) {
+                    // Atualizar a frase atual se for a mesma
+                    if (_currentPhrase.value?.id == phrase.id) {
+                        _currentPhrase.value = updatedPhrase
+                    }
+
+                    // Recarregar favoritos
                     loadFavorites()
+
+                    println("DEBUG: Frase favoritada: ID=${phrase.id}, isFavorite=${updatedPhrase.isFavorite}")
                 }
             } catch (e: Exception) {
-                _errorMessage.value = "Erro ao atualizar favorito: ${e.message}"
+                println("DEBUG: Erro ao favoritar frase: ${e.message}")
+                _errorMessage.value = "Erro ao adicionar aos favoritos"
             }
         }
     }
@@ -434,9 +483,54 @@ class PhraseViewModel(private val repository: PhraseRepository,
         notificationManager.showTestNotification()
     }
 
-    fun loadExplanation(id: Long) {
+    fun loadExplanation(phraseId: Long) {
+        if (phraseId <= 0) {
+            // Se ID inválido, usar a frase atual
+            _explanation.value = _currentPhrase.value?.explanation ?:
+                    "Explicação não disponível para esta frase."
+            return
+        }
+
         viewModelScope.launch {
-            _explanation.value = repository.getExplanationById(id)
+            try {
+                _isLoading.value = true
+                val phrase = repository.getPhraseById(phraseId)
+
+                if (phrase != null) {
+                    _explanation.value = phrase.explanation
+                    println("DEBUG: Explicação carregada para phraseId: $phraseId")
+                } else {
+                    _explanation.value = "Explicação não encontrada."
+                    println("DEBUG: Frase não encontrada para phraseId: $phraseId")
+                }
+            } catch (e: Exception) {
+                println("DEBUG: Erro ao carregar explicação: ${e.message}")
+                _explanation.value = "Erro ao carregar explicação."
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    // ✅ FUNÇÃO AUXILIAR para carregar explicação por texto (fallback)
+    fun loadExplanationByText(phraseText: String) {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                val phrase = repository.findPhraseByText(phraseText)
+
+                if (phrase != null) {
+                    _explanation.value = phrase.explanation
+                    println("DEBUG: Explicação carregada por texto")
+                } else {
+                    _explanation.value = "Esta frase veio de uma notificação especial. A explicação completa estará disponível em breve nas próximas atualizações do app."
+                }
+            } catch (e: Exception) {
+                println("DEBUG: Erro ao carregar explicação por texto: ${e.message}")
+                _explanation.value = "Erro ao carregar explicação."
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 

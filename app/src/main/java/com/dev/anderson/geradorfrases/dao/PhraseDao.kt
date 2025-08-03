@@ -65,4 +65,16 @@ interface PhraseDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM phrases WHERE text = :phraseText AND isFavorite = 1)")
     suspend fun isPhraseInFavorites(phraseText: String): Boolean
+
+    @Query("SELECT * FROM phrases WHERE text = :text LIMIT 1")
+    suspend fun findPhraseByText(text: String): Phrase?
+
+    @Query("SELECT * FROM phrases WHERE text LIKE :pattern LIMIT 1")
+    suspend fun findSimilarPhrase(pattern: String): Phrase?
+
+    @Query("SELECT * FROM phrases WHERE id = :id LIMIT 1")
+    suspend fun getPhraseById(id: Long): Phrase?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPhrase(phrase: Phrase): Long
 }

@@ -78,32 +78,41 @@ fun ExplanationScreen(
 
     // ✅ CARREGAMENTO COM RETRY E TIMEOUT
     LaunchedEffect(phraseId, retryCount) {
-        if (phraseId >= 0) {
-            isLoadingExplanation = true
-            explanationError = null
+        isLoadingExplanation = true
+        explanationError = null
 
-            try {
-                println("DEBUG: Iniciando carregamento da explicação para phraseId: $phraseId")
+        try {
+            if (phraseId > 0) {
+                // ✅ Tentar carregar pelo ID primeiro
                 viewModel.loadExplanation(phraseId)
-
-                // ✅ Timeout de 15 segundos
-                var timeoutCount = 0
-                while (explanation == null && timeoutCount < 150) { // 15 segundos (150 * 100ms)
-                    delay(100)
-                    timeoutCount++
-                }
-
-                if (explanation == null) {
-                    explanationError = "Timeout: Não foi possível carregar a explicação"
-                    println("DEBUG: Timeout ao carregar explicação")
-                }
-
-            } catch (e: Exception) {
-                explanationError = "Erro ao carregar explicação: ${e.message}"
-                println("DEBUG: Erro ao carregar explicação: ${e.message}")
-            } finally {
+            } else if (phraseText.isNotEmpty()) {
+                // ✅ Fallback: carregar pelo texto da frase
+                viewModel.loadExplanationByText(phraseText)
+            } else {
+                explanationError = "Informações da frase não disponíveis"
                 isLoadingExplanation = false
+                return@LaunchedEffect
             }
+
+            // ✅ Aguardar resultado com timeout reduzido
+            var timeoutCount = 0
+            while (explanation == null && timeoutCount < 100) { // 10 segundos (100 * 100ms)
+                delay(100)
+                timeoutCount++
+            }
+
+            if (explanation == null) {
+                explanationError = "Não foi possível carregar a explicação. Verifique sua conexão."
+                println("DEBUG: Timeout ao carregar explicação")
+            } else {
+                println("DEBUG: Explicação carregada com sucesso")
+            }
+
+        } catch (e: Exception) {
+            explanationError = "Erro ao carregar explicação: ${e.message}"
+            println("DEBUG: Erro ao carregar explicação: ${e.message}")
+        } finally {
+            isLoadingExplanation = false
         }
     }
 

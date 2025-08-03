@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import com.dev.anderson.geradorfrases.data.Phrase
 import com.dev.anderson.geradorfrases.data.PhrasesDatabase
 import com.dev.anderson.geradorfrases.repository.PhraseRepository
@@ -60,6 +61,7 @@ import com.dev.anderson.geradorfrases.util.ImageSharingUtils
 import com.google.android.gms.ads.*
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import kotlinx.coroutines.launch
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
@@ -2417,13 +2419,51 @@ class MainActivity : ComponentActivity() {
                 // ✅ Salvar como desbloqueada
                 markPhraseUnlocked(phrase.text, prefs)
 
+                // ✅ Se a frase não tem ID válido, salvá-la no banco primeiro
+                if (phrase.id <= 0) {
+                    phraseViewModel.viewModelScope.launch {
+                        try {
+                            val repository = PhraseRepository(PhrasesDatabase.getDatabase(context).phraseDao())
+                            val savedPhrase = repository.insertOrGetPhrase(phrase)
+
+                            // Usar a frase salva com ID válido
+                            val phraseToOpen = savedPhrase ?: phrase
+
+                            // ✅ Aguardar um momento antes de abrir a activity
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                openExplanationActivity(phraseToOpen)
+                            }, 500)
+
+                        } catch (e: Exception) {
+                            println("DEBUG: Erro ao salvar frase: ${e.message}")
+                            // Abrir mesmo assim
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                openExplanationActivity(phrase)
+                            }, 500)
+                        }
+                    }
+                } else {
+                    // ✅ Anúncio não disponível - melhor experiência do usuário
+                    val message = if (isLoading) {
+                        "⏳ Anúncio carregando... Tente novamente em alguns segundos."
+                    } else {
+                        "❌ Anúncio não disponível no momento. Desbloqueando gratuitamente!"
+                    }
+
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+
+                    if (!isLoading) {
+                        // ✅ Se não tem anúncio, desbloquear gratuitamente (boa experiência)
+                        markPhraseUnlocked(phrase.text, prefs)
+                        openExplanationActivity(phrase)
+
+                        // Tentar carregar anúncio para próximas vezes
+                        loadRewardedAd()
+                    }
+                }
+
                 // ✅ Mostrar feedback
                 Toast.makeText(context, "✅ Explicação desbloqueada!", Toast.LENGTH_SHORT).show()
-
-                // ✅ Aguardar um momento antes de abrir a activity (evita conflitos)
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    openExplanationActivity(phrase)
-                }, 500)
             }
         } else {
             // ✅ Anúncio não disponível - melhor experiência do usuário
