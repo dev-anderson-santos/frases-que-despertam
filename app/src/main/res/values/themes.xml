@@ -2,4 +2,5 @@
 <resources>
 
     <style name="Theme.FrasesQueDespertam" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.GeradorFrases" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

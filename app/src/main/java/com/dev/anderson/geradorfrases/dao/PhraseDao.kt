@@ -62,4 +62,7 @@ interface PhraseDao {
 
     @Query("SELECT explanation FROM phrases WHERE id = :id")
     suspend fun getExplanationById(id: Long): String?
+
+    @Query("SELECT EXISTS(SELECT 1 FROM phrases WHERE text = :phraseText AND isFavorite = 1)")
+    suspend fun isPhraseInFavorites(phraseText: String): Boolean
 }

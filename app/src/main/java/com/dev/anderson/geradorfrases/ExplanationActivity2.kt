@@ -28,6 +28,7 @@ import com.dev.anderson.geradorfrases.data.PhrasesDatabase
 import com.dev.anderson.geradorfrases.repository.PhraseRepository
 import com.dev.anderson.geradorfrases.ui.theme.FrasesQueDespertamTheme
 import com.dev.anderson.geradorfrases.viewmodel.PhraseViewModelFactory
+import kotlinx.coroutines.delay
 
 class ExplanationActivity2 : ComponentActivity() {
 
@@ -67,15 +68,53 @@ fun ExplanationScreen(
     phraseId: Long,
     onBack: () -> Unit
 ) {
-    // assim que aparecer, dispara o load
-    LaunchedEffect(phraseId) {
-        if (phraseId >= 0) {
-            viewModel.loadExplanation(phraseId)
-        }
-    }
+    // Estados locais para controle
+    var isLoadingExplanation by remember { mutableStateOf(false) }
+    var explanationError by remember { mutableStateOf<String?>(null) }
+    var retryCount by remember { mutableStateOf(0) }
 
     // observa o LiveData
     val explanation by viewModel.explanation.observeAsState()
+
+    // ✅ CARREGAMENTO COM RETRY E TIMEOUT
+    LaunchedEffect(phraseId, retryCount) {
+        if (phraseId >= 0) {
+            isLoadingExplanation = true
+            explanationError = null
+
+            try {
+                println("DEBUG: Iniciando carregamento da explicação para phraseId: $phraseId")
+                viewModel.loadExplanation(phraseId)
+
+                // ✅ Timeout de 15 segundos
+                var timeoutCount = 0
+                while (explanation == null && timeoutCount < 150) { // 15 segundos (150 * 100ms)
+                    delay(100)
+                    timeoutCount++
+                }
+
+                if (explanation == null) {
+                    explanationError = "Timeout: Não foi possível carregar a explicação"
+                    println("DEBUG: Timeout ao carregar explicação")
+                }
+
+            } catch (e: Exception) {
+                explanationError = "Erro ao carregar explicação: ${e.message}"
+                println("DEBUG: Erro ao carregar explicação: ${e.message}")
+            } finally {
+                isLoadingExplanation = false
+            }
+        }
+    }
+
+    // ✅ OBSERVAR MUDANÇAS NA EXPLICAÇÃO
+    LaunchedEffect(explanation) {
+        if (explanation != null) {
+            isLoadingExplanation = false
+            explanationError = null
+            println("DEBUG: Explicação carregada com sucesso: ${explanation?.take(50)}...")
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -166,37 +205,89 @@ fun ExplanationScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    if (explanation == null) {
-                        // ainda não carregou → loading
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(80.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
+                    when {
+                        // ✅ ESTADO DE LOADING
+                        isLoadingExplanation || (explanation == null && explanationError == null) -> {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(
-                                    color = Color(0xFF00BFFF),
-                                    modifier = Modifier.size(32.dp)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Color(0xFF00BFFF),
+                                        modifier = Modifier.size(40.dp),
+                                        strokeWidth = 3.dp
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Carregando explicação...",
+                                        color = Color.Gray,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "Aguarde alguns instantes",
+                                        color = Color.Gray,
+                                        fontSize = 12.sp,
+                                        fontStyle = FontStyle.Italic
+                                    )
+                                }
+                            }
+                        }
+                        // ✅ ESTADO DE ERRO
+                        explanationError != null -> {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B6B),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Erro ao carregar explicação",
+                                    color = Color(0xFFFF6B6B),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Carregando explicação...",
+                                    text = explanationError!!,
                                     color = Color.Gray,
-                                    fontSize = 14.sp
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center
                                 )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        retryCount++
+                                        explanationError = null
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF00BFFF)
+                                    )
+                                ) {
+                                    Text("Tentar Novamente")
+                                }
                             }
                         }
-                    } else {
-                        // já carregou ► exibe texto
-                        Text(
-                            text = explanation!!,
-                            color = Color.White,
-                            lineHeight = 24.sp,
-                            textAlign = TextAlign.Justify
-                        )
+
+                        // ✅ EXPLICAÇÃO CARREGADA
+                        explanation != null -> {
+                            Text(
+                                text = explanation!!,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                lineHeight = 24.sp,
+                                textAlign = TextAlign.Justify
+                            )
+                        }
                     }
                 }
             }

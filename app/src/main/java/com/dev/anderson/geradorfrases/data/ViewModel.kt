@@ -121,6 +121,16 @@ class PhraseViewModel(private val repository: PhraseRepository,
 
         _currentPhrase.value = notificationPhrase
         println("DEBUG: Frase da notificação definida no ViewModel: '$text'")
+
+        viewModelScope.launch {
+            try {
+                val favoriteStatus = repository.isPhraseInFavorites(text)
+                _currentPhrase.value = notificationPhrase.copy(isFavorite = favoriteStatus)
+                println("DEBUG: Status de favorito atualizado: $favoriteStatus")
+            } catch (e: Exception) {
+                println("DEBUG: Erro ao verificar favorito: ${e.message}")
+            }
+        }
     }
 
     fun loadRandomPhrase(category: String) {

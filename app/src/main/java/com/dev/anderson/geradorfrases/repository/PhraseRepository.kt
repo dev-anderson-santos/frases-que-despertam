@@ -92,4 +92,13 @@ class PhraseRepository(private val phraseDao: PhraseDao) {
     suspend fun getExplanationById(id: Long): String? {
         return phraseDao.getExplanationById(id)
     }
+
+    suspend fun isPhraseInFavorites(phraseText: String): Boolean {
+        return try {
+            phraseDao.isPhraseInFavorites(phraseText)
+        } catch (e: Exception) {
+            println("DEBUG: Erro ao verificar favorito: ${e.message}")
+            false
+        }
+    }
 }

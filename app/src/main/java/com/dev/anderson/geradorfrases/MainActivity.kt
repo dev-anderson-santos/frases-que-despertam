@@ -14,14 +14,17 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -30,6 +33,7 @@ import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +52,8 @@ import com.dev.anderson.geradorfrases.notifications.NotificationManager
 import com.dev.anderson.geradorfrases.notifications.NotificationReceiver
 import com.dev.anderson.geradorfrases.viewmodel.PhraseViewModelFactory
 import com.dev.anderson.geradorfrases.ui.theme.FrasesQueDespertamTheme
+import com.dev.anderson.geradorfrases.util.BackgroundType
+import com.dev.anderson.geradorfrases.util.ImageSharingUtils
 import com.google.android.gms.ads.*
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
@@ -145,20 +151,26 @@ class MainActivity : ComponentActivity() {
                     notificationTime = LocalTime.of(hour, minute)
                     cfgCategory = prefs.getString("notification_category", "") ?: ""
                     cfgSubcategory = prefs.getString("notification_subcategory", "") ?: ""
+                    shareAsImage = prefs.getBoolean("share_as_image", false)
                 }
             }
 
             // ✅ QUANDO VEM DE NOTIFICAÇÃO, IR PARA ABA PRINCIPAL E CARREGAR FRASE
-            LaunchedEffect(notificationPhrase) {
-                if (notificationPhrase != null) {
+            LaunchedEffect(fromNotification, notificationPhraseText) {
+                if (fromNotification && notificationPhraseText != null && notificationPhrase != null) {
                     selectedTab = 0 // Ir para aba principal
-                    // Definir a frase atual no ViewModel
+
+                    // Definir a frase no ViewModel
                     phraseViewModel.setCurrentPhraseFromNotification(
                         text = notificationPhrase!!.text,
                         reference = notificationPhrase!!.reference,
                         category = notificationPhrase!!.category
                     )
-                    println("DEBUG: Frase da notificação carregada: '${notificationPhrase!!.text}'")
+
+                    println("DEBUG: ✅ Frase da notificação processada: '${notificationPhrase!!.text}'")
+
+                    // Limpar para não processar novamente
+                    notificationPhrase = null
                 }
             }
 
@@ -197,7 +209,11 @@ class MainActivity : ComponentActivity() {
                     },
 
                     shareAsImage           = shareAsImage,
-                    onShareAsImageChange   = { shareAsImage = it },
+                    onShareAsImageChange = {
+                        shareAsImage = it
+                        savePreference("share_as_image", it)
+                        println("DEBUG: shareAsImage salvo: $it")
+                    },
 
                     cfgCategory            = cfgCategory,
                     onCategoryChange = { newCategory ->
@@ -251,11 +267,7 @@ class MainActivity : ComponentActivity() {
 
                     // ---- BUSCA ----
                     onSearch            = { phraseViewModel.searchPhrases(it) },
-                    // ✅ INDICAR SE VEIO DE NOTIFICAÇÃO
-                    isFromNotification  = notificationPhrase != null,
-                    onNotificationPhraseProcessed = {
-                        notificationPhrase = null // Limpar após processar
-                    }
+
                 )
             }
         }
@@ -263,17 +275,23 @@ class MainActivity : ComponentActivity() {
 
     // ✅ Tratar quando o app já está aberto e recebe nova notificação
     override fun onNewIntent(intent: Intent) {
-        if (intent != null) {
-            super.onNewIntent(intent)
-        }
+        super.onNewIntent(intent)
         setIntent(intent)
 
-        val fromNotification = intent?.getBooleanExtra("from_notification", false) ?: false
-        val phraseText = intent?.getStringExtra(NotificationReceiver.EXTRA_PHRASE_TEXT)
+        val fromNotification = intent.getBooleanExtra("from_notification", false)
+        val phraseText = intent.getStringExtra(NotificationReceiver.EXTRA_PHRASE_TEXT)
+        val phraseReference = intent.getStringExtra(NotificationReceiver.EXTRA_PHRASE_REFERENCE)
+        val phraseCategory = intent.getStringExtra(NotificationReceiver.EXTRA_PHRASE_CATEGORY)
 
         if (fromNotification && phraseText != null) {
-            println("DEBUG: Nova notificação recebida com app aberto: '$phraseText'")
-            // Aqui você pode usar um callback ou SharedFlow para comunicar com o Compose
+            println("DEBUG: ✅ Nova notificação recebida com app aberto: '$phraseText'")
+
+            // Definir frase diretamente no ViewModel
+            phraseViewModel.setCurrentPhraseFromNotification(
+                text = phraseText,
+                reference = phraseReference ?: "",
+                category = phraseCategory ?: ""
+            )
         }
     }
 
@@ -359,11 +377,7 @@ class MainActivity : ComponentActivity() {
         onUnlock: (Phrase) -> Unit,
 
         // ---- BUSCA ----
-        onSearch: (String) -> Unit,
-
-        // ✅ NOVOS PARÂMETROS PARA NOTIFICAÇÃO
-        isFromNotification: Boolean = false,
-        onNotificationPhraseProcessed: () -> Unit = {}
+        onSearch: (String) -> Unit
     ) {
         val context = LocalContext.current
         //var selectedTab by remember { mutableStateOf(0) }
@@ -493,8 +507,6 @@ class MainActivity : ComponentActivity() {
                         },
                         onShare = { phrase -> sharePhrase(phrase) },
                         onUnlock = { phrase -> unlockExplanation(phrase) },
-                        isFromNotification = isFromNotification,
-                        onNotificationPhraseProcessed = onNotificationPhraseProcessed,
                         phraseViewModel = phraseViewModel
                     )
                     1 -> FavoritesScreen(
@@ -737,12 +749,37 @@ class MainActivity : ComponentActivity() {
         onUnlock: (Phrase) -> Unit
     ) {
         var showExplanation by remember { mutableStateOf(false) }
+        var showBackgroundDialog by remember { mutableStateOf(false) }
         val context = LocalContext.current
+
         // ✅ Estado local para feedback imediato do favorito
         var isFavoriteLocal by remember(phrase.isFavorite) { mutableStateOf(phrase.isFavorite) }
-        val prefs = context.getSharedPreferences("frases_prefs", Context.MODE_PRIVATE)
-        var isUnlocked by remember {
+
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        var isUnlocked by remember(phrase.text) {
             mutableStateOf(prefs.getStringSet("desbloqueadas", emptySet())?.contains(phrase.text) == true)
+        }
+        val shareAsImage = prefs.getBoolean("share_as_image", false)
+
+        LaunchedEffect(phrase.text) {
+            val unlocked = prefs.getStringSet("desbloqueadas", emptySet())?.contains(phrase.text) == true
+            if (unlocked != isUnlocked) {
+                isUnlocked = unlocked
+                println("DEBUG: ✅ Estado de desbloqueio atualizado para '${phrase.text}': $isUnlocked")
+            }
+        }
+
+        // Dialog de seleção de fundo
+        if (showBackgroundDialog) {
+            BackgroundSelectorDialog(
+                phrase = phrase,
+                onDismiss = { showBackgroundDialog = false },
+                onBackgroundSelected = { backgroundType ->
+                    val imageSharingUtils = ImageSharingUtils(context)
+                    imageSharingUtils.sharePhrase(phrase, backgroundType)
+                    showBackgroundDialog = false
+                }
+            )
         }
 
         // ✅ Atualizar estado quando a activity retoma (volta do anúncio)
@@ -831,7 +868,11 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onUnlock(phrase) }
-                            .padding(vertical = 8.dp)
+                            .background(
+                                Color(0xFFFFA500).copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Lock,
@@ -839,35 +880,65 @@ class MainActivity : ComponentActivity() {
                             tint = Color(0xFFFFA500),
                             modifier = Modifier.size(24.dp)
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Desbloquear explicação da frase",
-                            color = Color.White,
-                            fontSize = 14.sp
-                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                "🎬 Assista um anúncio",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "Desbloqueie a explicação desta frase",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                 } else {
                     // ✅ Mostrar botão de "Ver explicação completa" quando desbloqueado
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onUnlock(phrase) } // Vai abrir a tela de explicação
-                            .padding(vertical = 8.dp)
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Ver explicação",
-                            tint = Color(0xFF4CAF50),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Ver explicação completa",
-                            color = Color.White,
-                            fontSize = 14.sp
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onUnlock(phrase) } // Vai abrir a tela de explicação
+                                .background(
+                                    Color(0xFF4CAF50).copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .padding(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "Ver explicação completa",
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column (modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "📖 Ver explicação completa",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "Abrir tela dedicada com explicação detalhada",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ArrowForward,
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                 }
@@ -894,7 +965,14 @@ class MainActivity : ComponentActivity() {
                     ActionButton(
                         icon = Icons.Default.Share,
                         contentDescription = "Compartilhar",
-                        onClick = { onShare(phrase) }
+                        onClick = {
+                            println("DEBBUG: Compartilhando a frase como imagem: " + shareAsImage)
+                            if (shareAsImage) {
+                                showBackgroundDialog = true
+                            } else {
+                                onShare(phrase)
+                            }
+                        }
                     )
 
                     // Copiar
@@ -914,13 +992,7 @@ class MainActivity : ComponentActivity() {
                         icon = if (isUnlocked) Icons.Default.Info else Icons.Default.Lock,
                         contentDescription = if (isUnlocked) "Ver Explicação" else "Desbloquear",
                         tint = if (isUnlocked) Color(0xFF4CAF50) else Color(0xFFFFA500),
-                        onClick = {
-                            if (isUnlocked) {
-                                showExplanation = !showExplanation
-                            } else {
-                                onUnlock(phrase)
-                            }
-                        }
+                        onClick = { onUnlock(phrase) }
                     )
                 }
             }
@@ -1354,6 +1426,7 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
@@ -1408,37 +1481,39 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Seção Tema
-//            ConfigSection(
-//                title = "Tema",
-//                titleColor = Color(0xFF00BFFF)
-//            ) {
-//                ConfigToggleItem(
-//                    title = "Modo escuro",
-//                    isChecked = darkMode,
-//                    onCheckedChange = onDarkModeChange
-//                )
-//            }
+            ConfigToggleItem(
+                title = "Compartilhar como imagem",
+                subtitle = "Criar imagens bonitas ao compartilhar frases",
+                isChecked = shareAsImage,
+                onCheckedChange = { newValue ->
+                    println("DEBUG: Mudando shareAsImage para: $newValue")
+                    onShareAsImageChange(newValue)
+                }
+            )
 
-            // Seção Preferências de Frases
-//            ConfigSection(
-//                title = "Preferências de Frases",
-//                titleColor = Color(0xFF00BFFF)
-//            ) {
-//                ConfigToggleItem(
-//                    title = "Compartilhar com imagens",
-//                    isChecked = shareAsImage,
-//                    onCheckedChange = onShareAsImageChange
-//                )
+            if (shareAsImage) {
+                // Spacer(modifier = Modifier.height(8.dp))
 
-//                Spacer(modifier = Modifier.height(16.dp))
-//
-//                ConfigSelectItem(
-//                    title = "Idioma das frases",
-//                    selectedValue = selectedLanguage,
-//                    onClick = { /* Implementar seleção de idioma */ }
-//                )
-//            }
+                // Informação adicional quando ativado
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFF00BFFF),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Você poderá escolher o fundo da imagem ao compartilhar",
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
 
             // Seção Mais
             ConfigSection(
@@ -1605,14 +1680,6 @@ class MainActivity : ComponentActivity() {
     ) {
         var expanded by remember { mutableStateOf(false) }
 
-        // ✅ DEBUG: Log quando items mudam
-        LaunchedEffect(items) {
-            println("DEBUG: DropdownField '$label' recebeu ${items.size} itens")
-            items.forEachIndexed { index, item ->
-                println("DEBUG: Item[$index]: '$item'")
-            }
-        }
-
         Column(modifier = modifier) {
             // Label
             Text(
@@ -1623,7 +1690,11 @@ class MainActivity : ComponentActivity() {
             )
 
             // Dropdown Box
-            Box {
+            Box (
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+            ) {
                 OutlinedTextField(
                     value = selected.ifEmpty { placeholder },
                     onValueChange = { }, // Read-only
@@ -1651,18 +1722,17 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.clickable { expanded = !expanded }
                         )
                     },
-                    singleLine = true
+                    singleLine = true,
+                    enabled = false
                 )
 
                 // Dropdown Menu
                 DropdownMenu(
                     expanded = expanded,
-                    onDismissRequest = {
-                        println("DEBUG: DropdownMenu '$label' fechado")
-                        expanded = false
-                    },
+                    onDismissRequest = { expanded = false },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 200.dp)
                         .background(Color(0xFF1E1E1E))
                 ) {
                     // Opção padrão "Todas" ou "Nenhuma"
@@ -1740,33 +1810,40 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.padding(bottom = 4.dp)
             )
 
-            // Time Input Field
-            OutlinedTextField(
-                value = time.format(DateTimeFormatter.ofPattern("HH:mm")),
-                onValueChange = { }, // Read-only
-                readOnly = true,
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { showTimePicker = true },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFF00BFFF),
-                    unfocusedBorderColor = Color.Gray,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    cursorColor = Color(0xFF00BFFF),
-                    focusedLabelColor = Color(0xFF00BFFF),
-                    unfocusedLabelColor = Color.Gray
-                ),
-                trailingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.AccessTime,
-                        contentDescription = "Selecionar horário",
-                        tint = Color.Gray,
-                        modifier = Modifier.clickable { showTimePicker = true }
-                    )
-                },
-                singleLine = true
-            )
+                    .clickable { showTimePicker = true } // ✅ Clique em toda a área
+            ) {
+                // Time Input Field
+                OutlinedTextField(
+                    value = time.format(DateTimeFormatter.ofPattern("HH:mm")),
+                    onValueChange = { }, // Read-only
+                    readOnly = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showTimePicker = true },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF00BFFF),
+                        unfocusedBorderColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color(0xFF00BFFF),
+                        focusedLabelColor = Color(0xFF00BFFF),
+                        unfocusedLabelColor = Color.Gray
+                    ),
+                    trailingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.AccessTime,
+                            contentDescription = "Selecionar horário",
+                            tint = Color.Gray,
+                            modifier = Modifier.clickable { showTimePicker = true }
+                        )
+                    },
+                    singleLine = true,
+                    enabled = false
+                )
+            }
         }
 
         // Time Picker Dialog
@@ -2072,6 +2149,168 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable
+    fun BackgroundSelectorDialog(
+        phrase: Phrase,
+        onDismiss: () -> Unit,
+        onBackgroundSelected: (BackgroundType) -> Unit
+    ) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                Text(
+                    "Escolha o fundo da imagem",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(BackgroundType.values()) { backgroundType ->
+                        BackgroundOption(
+                            backgroundType = backgroundType,
+                            onClick = {
+                                onBackgroundSelected(backgroundType)
+                                onDismiss()
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = Color(0xFF00BFFF)
+                    )
+                ) {
+                    Text("Cancelar")
+                }
+            },
+            containerColor = Color(0xFF1E1E1E),
+            textContentColor = Color.White
+        )
+    }
+
+    @Composable
+    fun BackgroundOption(
+        backgroundType: BackgroundType,
+        onClick: () -> Unit
+    ) {
+        val (name, description, colors) = when (backgroundType) {
+            BackgroundType.FLOWERS_FIELD -> Triple(
+                "🌸 Campo de Flores",
+                "Fundo natural com flores delicadas",
+                listOf(Color(0xFFE8F5E8), Color(0xFF4A7C59))
+            )
+            BackgroundType.SUNSET_SKY -> Triple(
+                "🌅 Céu do Pôr do Sol",
+                "Gradiente dourado e laranja",
+                listOf(Color(0xFFFFE4B5), Color(0xFF4B0082))
+            )
+            BackgroundType.NATURE_GREEN -> Triple(
+                "🌿 Natureza Verde",
+                "Verde suave e relaxante",
+                listOf(Color(0xFF90EE90), Color(0xFF006400))
+            )
+            BackgroundType.OCEAN_WAVES -> Triple(
+                "🌊 Ondas do Oceano",
+                "Azul marinho profundo",
+                listOf(Color(0xFF87CEEB), Color(0xFF191970))
+            )
+            BackgroundType.MOUNTAIN_VIEW -> Triple(
+                "🏔️ Vista das Montanhas",
+                "Tons terrosos e acolhedores",
+                listOf(Color(0xFFFFE4E1), Color(0xFF8B4513))
+            )
+            BackgroundType.GRADIENT_PURPLE -> Triple(
+                "💜 Gradiente Roxo",
+                "Elegante e sofisticado",
+                listOf(Color(0xFFE6E6FA), Color(0xFF4B0082))
+            )
+            BackgroundType.GRADIENT_BLUE -> Triple(
+                "💙 Gradiente Azul",
+                "Azul suave e tranquilo",
+                listOf(Color(0xFFE0F6FF), Color(0xFF4682B4))
+            )
+            BackgroundType.SOLID_ELEGANT -> Triple(
+                "✨ Elegante Sólido",
+                "Fundo sólido sofisticado",
+                listOf(Color(0xFF2C3E50))
+            )
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick() },
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xFF2A2A2A)
+            ),
+            elevation = CardDefaults.cardElevation(4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Preview do fundo
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .background(
+                            brush = if (colors.size > 1) {
+                                Brush.verticalGradient(colors)
+                            } else {
+                                Brush.verticalGradient(listOf(colors[0], colors[0]))
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                )
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column {
+                    Text(
+                        text = name,
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        text = description,
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+    }
+
+    // Função auxiliar para mostrar o dialog
+    @Composable
+    fun ShareWithBackgroundSelection(
+        phrase: Phrase,
+        context: Context,
+        showDialog: Boolean,
+        onDismiss: () -> Unit
+    ) {
+        if (showDialog) {
+            BackgroundSelectorDialog(
+                phrase = phrase,
+                onDismiss = onDismiss,
+                onBackgroundSelected = { backgroundType ->
+                    val imageSharingUtils = ImageSharingUtils(context)
+                    imageSharingUtils.sharePhrase(phrase, backgroundType)
+                }
+            )
+        }
+    }
+
     private fun rateApp() {
         val uri = Uri.parse("market://details?id=$packageName")
         startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
@@ -2080,6 +2319,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sharePhrase(phrase: Phrase) {
+        // ✅ Compartilhamento como texto (método atual)
+        // A lógica de imagem já está no PhraseCard
         val shareText = "${phrase.text}\n\n- ${phrase.reference}"
         val shareIntent = Intent().apply {
             action = Intent.ACTION_SEND
@@ -2089,77 +2330,141 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent.createChooser(shareIntent, "Compartilhar frase"))
     }
 
+//    @RequiresApi(Build.VERSION_CODES.Q)
+//    private fun showBackgroundSelectorDialog(phrase: Phrase) {
+//        val backgroundTypes = BackgroundType.values()
+//        val options = arrayOf(
+//            "🌸 Campo de Flores",
+//            "🌅 Céu do Pôr do Sol",
+//            "🌿 Natureza Verde",
+//            "🌊 Ondas do Oceano",
+//            "🏔️ Vista das Montanhas",
+//            "💜 Gradiente Roxo",
+//            "💙 Gradiente Azul",
+//            "✨ Elegante Sólido"
+//        )
+//
+//        val builder = android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_DayNight)
+//        builder.setTitle("✨ Escolha o estilo da sua imagem")
+//        builder.setItems(options) { _, which ->
+//            val selectedBackground = backgroundTypes[which]
+//            val imageSharingUtils = ImageSharingUtils(this)
+//            imageSharingUtils.sharePhrase(phrase, selectedBackground)
+//        }
+//        builder.setNegativeButton("Cancelar", null)
+//        builder.show()
+//    }
+
     private fun unlockExplanation(phrase: Phrase) {
         val context = this
-        val prefs = getSharedPreferences("frases_prefs", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         val isUnlocked = prefs.getStringSet("desbloqueadas", emptySet())?.contains(phrase.text) == true
 
         if (isUnlocked) {
             // Já desbloqueado, abrir explicação diretamente
-            val intent = Intent(this, ExplanationActivity2::class.java)
-            intent.putExtra("phraseId", phrase.id)
-            intent.putExtra("phraseText", phrase.text)
-//            intent.putExtra("explanation", phrase.explanation)
-            startActivity(intent)
+            openExplanationActivity(phrase)
             return
         }
-//        if (!hasShownRewardedAdThisSession && rewardedAd != null) {
+
         if (rewardedAd != null) {
-            // Mostrar anúncio e desbloquear
+            println("DEBUG: Mostrando anúncio recompensado...")
+
+            // ✅ Configurar callback ANTES de mostrar o anúncio
+            rewardedAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
+                override fun onAdDismissedFullScreenContent() {
+                    println("DEBUG: Anúncio foi fechado")
+                    // Recarregar novo anúncio para próxima vez
+                    rewardedAd = null
+                    loadRewardedAd()
+                }
+
+                override fun onAdFailedToShowFullScreenContent(error: AdError) {
+                    println("DEBUG: ❌ Falha ao mostrar anúncio: ${error.message}")
+                    // Em caso de erro, mostrar a explicação mesmo assim (boa experiência do usuário)
+                    markPhraseUnlocked(phrase.text, prefs)
+                    openExplanationActivity(phrase)
+
+                    // Tentar recarregar anúncio
+                    rewardedAd = null
+                    loadRewardedAd()
+                }
+
+                override fun onAdShowedFullScreenContent() {
+                    println("DEBUG: Anúncio exibido com sucesso")
+                }
+            }
+
+            // Mostrar anúncio
             rewardedAd?.show(this) { rewardItem ->
                 println("DEBUG: ✅ Usuário ganhou recompensa: ${rewardItem.amount} ${rewardItem.type}")
-                // ganhei recompensa -> Salvar como desbloqueada
+
+                // ✅ Salvar como desbloqueada
                 markPhraseUnlocked(phrase.text, prefs)
 
-                // Mostrar feedback ao usuário
+                // ✅ Mostrar feedback
                 Toast.makeText(context, "✅ Explicação desbloqueada!", Toast.LENGTH_SHORT).show()
 
-//                val currentUnlocked = prefs.getStringSet("desbloqueadas", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-//                currentUnlocked.add(phrase.text)
-//                prefs.edit().putStringSet("desbloqueadas", currentUnlocked).apply()
-
-                // Abrir explicação
-                // ✅ IMPORTANTE: Usar FLAG para não empilhar activities
-                val intent = Intent(this, ExplanationActivity2::class.java).apply {
-                    putExtra("phraseId", phrase.id)
-                    putExtra("phraseText", phrase.text)
-                    // ✅ Flags para evitar empilhamento de activities
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-                startActivity(intent)
-
-                // marco que já mostrei o ad nesta sessão
-//                hasShownRewardedAdThisSession = true
-
-                // Recarregar anúncio
-                rewardedAd = null
-                loadRewardedAd()
-            } /*?: run {
-                Toast.makeText(context, "Anúncio não está pronto. Tente novamente.", Toast.LENGTH_SHORT).show()
-                markPhraseUnlocked(phrase.text, prefs)
-                loadRewardedAd()
-            }*/
+                // ✅ Aguardar um momento antes de abrir a activity (evita conflitos)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    openExplanationActivity(phrase)
+                }, 500)
+            }
         } else {
-            // Anúncio não disponível
+            // ✅ Anúncio não disponível - melhor experiência do usuário
             val message = if (isLoading) {
                 "⏳ Anúncio carregando... Tente novamente em alguns segundos."
             } else {
-                "❌ Anúncio não disponível. Tentando carregar..."
+                "❌ Anúncio não disponível no momento. Desbloqueando gratuitamente!"
             }
 
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 
-            // Tentar carregar se não estiver carregando
             if (!isLoading) {
+                // ✅ Se não tem anúncio, desbloquear gratuitamente (boa experiência)
+                markPhraseUnlocked(phrase.text, prefs)
+                openExplanationActivity(phrase)
+
+                // Tentar carregar anúncio para próximas vezes
                 loadRewardedAd()
             }
         }
     }
 
-    private fun markPhraseUnlocked(text: String, prefs: SharedPreferences) {
-        val unlocked = prefs.getStringSet("desbloqueadas", mutableSetOf())!!.toMutableSet()
-        unlocked.add(text)
-        prefs.edit().putStringSet("desbloqueadas", unlocked).apply()
+    // ✅ FUNÇÃO AUXILIAR PARA ABRIR A EXPLICAÇÃO
+    private fun openExplanationActivity(phrase: Phrase) {
+        println("DEBUG: Abrindo ExplanationActivity2 com phraseId=${phrase.id}")
+
+        val intent = Intent(this, ExplanationActivity2::class.java).apply {
+            putExtra("phraseId", phrase.id)
+            putExtra("phraseText", phrase.text)
+            putExtra("phrase", phrase.text) // Manter compatibilidade
+
+            // ✅ Flags para evitar problemas de navegação
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            println("DEBUG: ❌ Erro ao abrir ExplanationActivity2: ${e.message}")
+            Toast.makeText(this, "Erro ao abrir explicação", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun markPhraseUnlocked(phraseText: String, prefs: SharedPreferences) {
+        try {
+            val currentUnlocked = prefs.getStringSet("desbloqueadas", mutableSetOf())?.toMutableSet()
+                ?: mutableSetOf()
+
+            if (currentUnlocked.add(phraseText)) {
+                prefs.edit().putStringSet("desbloqueadas", currentUnlocked).apply()
+                println("DEBUG: ✅ Frase marcada como desbloqueada: '$phraseText'")
+            } else {
+                println("DEBUG: Frase já estava desbloqueada: '$phraseText'")
+            }
+        } catch (e: Exception) {
+            println("DEBUG: ❌ Erro ao marcar frase como desbloqueada: ${e.message}")
+        }
     }
 
     private fun loadRewardedAd() {

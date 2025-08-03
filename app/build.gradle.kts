@@ -61,6 +61,20 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx) // 2.7.0
     implementation(libs.androidx.lifecycle.livedata.ktx) // 2.7.0
 
+    // Retrofit + Moshi (ou Gson)
+    implementation("com.squareup.retrofit2:retrofit:2.9.0") // Or the latest stable version
+    implementation("com.squareup.retrofit2:converter-moshi:2.9.0") // Or the latest stable version
+
+// If using Gson instead of Moshi
+// implementation("com.squareup.retrofit2:converter-gson:2.9.0") // Or the latest stable version
+// implementation("com.google.code.gson:gson:2.10.1") // Or the latest stable version
+
+// Coil Compose para carregar URL em Image
+    implementation("io.coil-kt:coil-compose:2.6.0") // Or the latest stable version
+
+// Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3") // Or the latest stable version
+
     // JSON parsing
     implementation(libs.gson)
     implementation(libs.androidx.recyclerview)
