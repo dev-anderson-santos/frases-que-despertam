@@ -13,8 +13,8 @@ android {
         applicationId = "com.dev.anderson.geradorfrases"
         minSdk = 23
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.1"
+        versionCode = 5
+        versionName = "2.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -1,5 +1,6 @@
 package com.dev.anderson.geradorfrases
 
+import android.annotation.SuppressLint
 import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -12,7 +13,9 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
@@ -87,6 +90,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @SuppressLint("ResourceAsColor")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -107,6 +111,17 @@ class MainActivity : ComponentActivity() {
 
         MobileAds.initialize(this)
         loadRewardedAd()
+
+        // habilita edge-to-edge, deixando o status e navigation bar transparentes
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(
+                scrim = android.R.color.transparent
+            ),
+            navigationBarStyle = SystemBarStyle.light(
+                scrim     = android.R.color.transparent,
+                darkScrim = android.R.color.transparent
+            )
+        )
 
         setContent {
             // 1) LIFT: todos os estados que antes ficavam dentro do AppScreen
@@ -468,6 +483,7 @@ class MainActivity : ComponentActivity() {
                     .fillMaxSize()
                     .padding(paddingValues)
                     .background(Color(0xFF101010))
+                    .systemBarsPadding()
             ) {
                 when (selectedTab) {
                     0 -> PhrasesScreen(
